@@ -1,0 +1,37 @@
+{
+  "name": "whatsapp_music_bot",
+  "description": "Turn your number into a DJ!",
+  "version": "3.1.0",
+  "main": "main.ts",
+  "license": "MIT",
+  "author": {
+    "email": "eyervictor@gmail.com",
+    "name": "Victor Eyer",
+    "url": "https://github.com/mlg404"
+  },
+  "scripts": {
+    "start": "ts-node-dev --transpile-only --ignore-watch node_modules src/main.ts",
+    "test:ollama": "ts-node --files scripts/test-ollama.ts"
+  },
+  "devDependencies": {
+    "@types/ioredis": "^4.28.10",
+    "@typescript-eslint/eslint-plugin": "^5.28.0",
+    "@typescript-eslint/parser": "^5.28.0",
+    "eslint": "^8.17.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-config-prettier": "^8.5.0",
+    "eslint-plugin-import": "^2.26.0",
+    "eslint-plugin-prettier": "^4.0.0",
+    "prettier": "^2.7.0",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^4.7.3"
+  },
+  "dependencies": {
+    "axios": "^1.7.0",
+    "dotenv": "^17.4.2",
+    "ioredis": "^5.8.2",
+    "puppeteer": "^24.31.0",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "github:timothydillan/whatsapp-web.js#fix/duplicate-events-and-bindings"
+  }
+}

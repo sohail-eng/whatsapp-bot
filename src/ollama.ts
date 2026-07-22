@@ -185,17 +185,23 @@ export async function respondViaOllama(message: Message): Promise<void> {
     try {
       const aiDecision = await requestSchemaRouterDecision(message.body, askOllamaChat);
       if (aiDecision) {
-        // Keep heuristic profile keys when the AI router drops them.
+        const heuristicProfile = fallbackDecision.intent === 'profile_lookup'
+          && fallbackDecision.requiredKeys.length > 0;
+        // The AI router can veto heuristic keyword hits: when it says 'direct',
+        // the message merely mentions a profile word and is not a profile question.
+        const keepProfilePath = heuristicProfile && aiDecision.intent !== 'direct';
+        // Keep heuristic profile keys when the AI router drops them,
+        // unless the AI vetoed the profile path entirely.
         routerDecision = {
           ...aiDecision,
-          requiredKeys: [...new Set([...fallbackDecision.requiredKeys, ...aiDecision.requiredKeys])],
-          intent: fallbackDecision.intent === 'profile_lookup' && fallbackDecision.requiredKeys.length > 0
-            ? 'profile_lookup'
-            : aiDecision.intent,
+          requiredKeys: heuristicProfile && !keepProfilePath
+            ? aiDecision.requiredKeys
+            : [...new Set([...fallbackDecision.requiredKeys, ...aiDecision.requiredKeys])],
+          intent: keepProfilePath ? 'profile_lookup' : aiDecision.intent,
         };
         const aiSelection = decisionToContextSelection(routerDecision);
         // Clear profile questions should stay on the profile path; don't let "mixed" pull in summary/history.
-        if (fallbackDecision.intent === 'profile_lookup' && fallbackDecision.requiredKeys.length > 0) {
+        if (keepProfilePath) {
           contextSelection = {
             ...decisionToContextSelection(routerDecision),
             language: fallbackSelection.language === 'roman_urdu'

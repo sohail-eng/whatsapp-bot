@@ -11,11 +11,15 @@ function factLabel(key: string, language: DetectedLanguage): string {
   const map: Record<string, { english: string; roman_urdu: string; urdu: string }> = {
     'identity.wifeName': { english: "Sohail's wife's name", roman_urdu: 'Sohail ki wife ka naam', urdu: 'سہیل کی اہلیہ کا نام' },
     'identity.sisterName': { english: "Sohail's sister's name", roman_urdu: 'Sohail ki sister ka naam', urdu: 'سہیل کی بہن کا نام' },
+    'identity.brotherName': { english: "Sohail's brother's name", roman_urdu: 'Sohail ke brother ka naam', urdu: 'سہیل کے بھائی کا نام' },
+    'identity.motherName': { english: "Sohail's mother's name", roman_urdu: 'Sohail ki mother ka naam', urdu: 'سہیل کی والدہ کا نام' },
+    'identity.fatherName': { english: "Sohail's father's name", roman_urdu: 'Sohail ke father ka naam', urdu: 'سہیل کے والد کا نام' },
+    'identity.age': { english: "Sohail's age", roman_urdu: 'Sohail ki age', urdu: 'سہیل کی عمر' },
     'identity.maritalStatus': { english: 'Sohail', roman_urdu: 'Sohail', urdu: 'سہیل' },
     'identity.birthday': { english: "Sohail's birthday", roman_urdu: 'Sohail ki birthday', urdu: 'سہیل کی سالگرہ' },
     'contact.email': { english: "Sohail's email", roman_urdu: 'Sohail ka email', urdu: 'سہیل کا ای میل' },
     'social.github': { english: "Sohail's GitHub username", roman_urdu: 'Sohail ka GitHub username', urdu: 'سہیل کا GitHub username' },
-    'professional.experienceYears': { english: 'Sohail has', roman_urdu: 'Sohail ko', urdu: 'سہیل کے پاس' },
+    'professional.experienceYears': { english: 'Sohail has', roman_urdu: 'Sohail k pass', urdu: 'سہیل کے پاس' },
   };
   return map[key]?.[language] || key;
 }

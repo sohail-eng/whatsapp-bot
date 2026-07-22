@@ -1,10 +1,11 @@
 import { Client, LocalAuth } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
+import { execSync } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 
 import text from './language';
 import { LANGUAGE } from './config';
-
-import fs from 'fs';
 
 const chromiumPath = '/usr/bin/google-chrome';
 
@@ -15,6 +16,9 @@ if (!executablePath) {
 } else {
   console.log('✅ Using local Chromium:', executablePath);
 }
+
+const AUTH_DATA_PATH = path.resolve(process.cwd(), '.wwebjs_auth');
+const SESSION_DIR = path.join(AUTH_DATA_PATH, 'session');
 
 let activeClient: Client | null = null;
 
@@ -59,7 +63,7 @@ function attachLifecycleListeners(client: Client): void {
  */
 export function createWhatsAppClient(): Client {
   const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({ dataPath: AUTH_DATA_PATH }),
     puppeteer: {
       headless: false,
       executablePath,
@@ -80,4 +84,98 @@ export function getClient(): Client {
     throw new Error('WhatsApp client has not been created yet');
   }
   return activeClient;
+}
+
+export function hasClient(): boolean {
+  return activeClient !== null;
+}
+
+/** Remove Chrome singleton locks left behind by a crashed / detached browser. */
+function clearSessionSingletonLocks(): void {
+  for (const lockName of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+    const lockPath = path.join(SESSION_DIR, lockName);
+    try {
+      if (fs.existsSync(lockPath)) {
+        fs.unlinkSync(lockPath);
+        console.log(`[WA] Removed stale ${lockName}`);
+      }
+    } catch (error) {
+      console.warn(`[WA] Could not remove ${lockName}:`, error);
+    }
+  }
+}
+
+/**
+ * Kill any Chrome/Chromium processes still attached to our LocalAuth session dir.
+ * Needed when puppeteer reports a detached frame but the OS process keeps the profile lock.
+ */
+export async function forceReleaseSessionLock(): Promise<void> {
+  try {
+    execSync(`pkill -f ${JSON.stringify(SESSION_DIR)} || true`, { stdio: 'ignore' });
+  } catch {
+    // pkill returns non-zero when nothing matched
+  }
+
+  clearSessionSingletonLocks();
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+}
+
+async function forceClosePuppeteerBrowser(client: Client): Promise<void> {
+  const browser = (client as { pupBrowser?: {
+    isConnected?: () => boolean;
+    close: () => Promise<void>;
+    process?: () => { killed?: boolean; kill: (signal?: string) => void } | null;
+    pages?: () => Promise<Array<{ close: () => Promise<void> }>>;
+  } }).pupBrowser;
+
+  if (!browser) return;
+
+  try {
+    const pages = browser.pages ? await browser.pages().catch(() => []) : [];
+    await Promise.all(pages.map((page) => page.close().catch(() => undefined)));
+  } catch {
+    // ignore
+  }
+
+  try {
+    if (!browser.isConnected || browser.isConnected()) {
+      await browser.close();
+    }
+  } catch {
+    // ignore — process kill below is the fallback
+  }
+
+  try {
+    const proc = browser.process?.();
+    if (proc && !proc.killed) {
+      proc.kill('SIGKILL');
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Tear down the active client and ensure the session profile is unlocked
+ * so a new Client can launch against the same LocalAuth directory.
+ */
+export async function destroyWhatsAppClient(): Promise<void> {
+  const client = activeClient;
+  activeClient = null;
+  if (!client) {
+    await forceReleaseSessionLock();
+    return;
+  }
+
+  // When the frame is already detached, Client.destroy() often skips browser.close()
+  // because isConnected() is false while the Chrome process is still alive.
+  await forceClosePuppeteerBrowser(client);
+
+  try {
+    await client.destroy();
+  } catch (error) {
+    console.warn('[WA] client.destroy() failed:', error);
+  }
+
+  await forceReleaseSessionLock();
 }

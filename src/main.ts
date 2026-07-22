@@ -1,4 +1,4 @@
-import { createWhatsAppClient, getClient } from './client';
+import { createWhatsAppClient, destroyWhatsAppClient, forceReleaseSessionLock, getClient, hasClient } from './client';
 import commands from './commands';
 import {
   MY_NUMBER,
@@ -8,7 +8,7 @@ import {
   WA_RECONNECT_READY_TIMEOUT_MS,
 } from './config';
 import { respondViaOllama } from './ollama';
-import { addBlockedPattern } from './utils/blockedPatterns';
+import { addBlockedPattern, isBlocked } from './utils/blockedPatterns';
 import { isRecentlyBotSent, isRecentlyReplied } from './utils/replyDedup';
 import fs from 'fs';
 import path from 'path';
@@ -28,6 +28,7 @@ let reconnectReadyTimeout: NodeJS.Timeout | null = null;
 let pendingHealthCheckToken: string | null = null;
 let reconnectInProgress = false;
 let runtimeHandlersAttachedTo: Client | null = null;
+let reconnectDelayMs = 3_000;
 
 function clearPendingHealthCheck(): void {
   pendingHealthCheckToken = null;
@@ -62,13 +63,27 @@ function initializeWhatsApp(client: Client, reason: string): void {
     void reconnectWhatsApp(`client did not become ready within ${WA_RECONNECT_READY_TIMEOUT_MS}ms`);
   }, WA_RECONNECT_READY_TIMEOUT_MS);
 
-  try {
-    void client.initialize();
-  } catch (error) {
+  void client.initialize().catch(async (error) => {
     clearReconnectReadyTimeout();
-    reconnectInProgress = false;
     console.error('[WA] Failed to initialize client:', error);
-  }
+
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('browser is already running')) {
+      console.warn('[WA] Session profile still locked; force-releasing browser lock');
+      await forceReleaseSessionLock();
+      reconnectInProgress = false;
+      reconnectDelayMs = Math.min(reconnectDelayMs * 2, 30_000);
+      void reconnectWhatsApp('browser session lock after reconnect');
+      return;
+    }
+
+    reconnectInProgress = false;
+    try {
+      await destroyWhatsAppClient();
+    } catch {
+      // ignore cleanup errors after a failed launch
+    }
+  });
 }
 
 async function reconnectWhatsApp(reason: string): Promise<void> {
@@ -81,21 +96,21 @@ async function reconnectWhatsApp(reason: string): Promise<void> {
   console.warn(`[WA] Reconnecting: ${reason}`);
 
   try {
-    const oldClient = getClient();
     runtimeHandlersAttachedTo = null;
-    await oldClient.destroy();
+    await destroyWhatsAppClient();
   } catch (error) {
     console.warn('[WA] Error while closing the previous client:', error);
   }
 
-  // Give Chromium a moment to fully release the session before opening a new one.
+  const delay = reconnectDelayMs;
+  console.log(`[WA] Waiting ${delay}ms before launching a new client`);
   setTimeout(() => {
     startWhatsAppClient(`reconnect after: ${reason}`);
-  }, 2_000);
+  }, delay);
 }
 
 async function runHealthCheck(): Promise<void> {
-  if (pendingHealthCheckToken || reconnectInProgress) return;
+  if (pendingHealthCheckToken || reconnectInProgress || !hasClient()) return;
 
   const token = `__wa_healthcheck__${Date.now()}`;
   pendingHealthCheckToken = token;
@@ -254,6 +269,98 @@ const shortMessage = (message: String) => {
   return message_text;
 }
 
+/** Handle YouTube / TikTok / Facebook / Instagram links. Returns true if handled. */
+async function handleMediaLinks(message: Message, body_text: string): Promise<boolean> {
+  if (body_text.startsWith(PREFIX)) return false;
+
+  const firstLine = body_text.split('\n')[0].trim();
+
+  const youtubeUrl = extractYouTubeUrl(firstLine);
+  if (youtubeUrl) {
+    await commands['!play']?.run(message, youtubeUrl);
+    return true;
+  }
+
+  if (!firstLine.startsWith('http')) return false;
+
+  let videoUrl: string | null = null;
+  let platform: VideoPlatform = 'tiktok';
+  let platformName = 'TikTok';
+
+  if (isTikTokUrl(firstLine)) {
+    videoUrl = extractTikTokUrl(firstLine);
+    platform = 'tiktok';
+    platformName = 'TikTok';
+  } else if (isFacebookUrl(firstLine)) {
+    videoUrl = extractFacebookUrl(firstLine);
+    platform = 'facebook';
+    platformName = 'Facebook';
+  } else if (isInstagramUrl(firstLine)) {
+    videoUrl = extractInstagramUrl(firstLine);
+    platform = 'instagram';
+    platformName = 'Instagram';
+  }
+
+  if (!videoUrl) return false;
+
+  try {
+    await message.reply(`🎬 Downloading ${platformName} video...`).catch(() => {});
+    const downloadResult = await downloadVideo(videoUrl, platform);
+    const outputFile = path.resolve(downloadResult.path);
+
+    if (!fs.existsSync(outputFile)) {
+      throw new Error('Download finished but file is missing.');
+    }
+
+    // Check file size (WhatsApp Web limit is ~16MB for videos)
+    const stats = fs.statSync(outputFile);
+    const fileSizeMB = stats.size / (1024 * 1024);
+    const MAX_VIDEO_SIZE_MB = 16;
+
+    if (stats.size > MAX_VIDEO_SIZE_MB * 1024 * 1024) {
+      console.log(`[${platformName.toUpperCase()}]`, `Video too large: ${fileSizeMB.toFixed(2)}MB (max: ${MAX_VIDEO_SIZE_MB}MB)`);
+      try {
+        await message.reply(`❌ Video is too large (${fileSizeMB.toFixed(2)}MB). WhatsApp limit is ${MAX_VIDEO_SIZE_MB}MB.`);
+      } catch {}
+      try {
+        fs.unlinkSync(outputFile);
+      } catch (unlinkErr) {
+        console.error(`[${platformName.toUpperCase()}]`, 'Failed to delete oversized file:', unlinkErr);
+      }
+      return true;
+    }
+
+    const videoTitle = downloadResult.title || `${platformName} Video`;
+    console.log(`[${platformName.toUpperCase()}]`, 'Downloaded video:', videoTitle, outputFile, `(${fileSizeMB.toFixed(2)}MB)`);
+
+    try {
+      const media = MessageMedia.fromFilePath(outputFile);
+      await message.reply(media);
+      console.log(`[${platformName.toUpperCase()}]`, 'Video sent successfully');
+    } catch (sendErr: any) {
+      console.error(`[${platformName.toUpperCase()}]`, 'Error sending video:', sendErr?.message || sendErr);
+      try {
+        await message.reply(`✅ Video downloaded: ${videoTitle}`);
+        await message.reply(`📁 File saved at: downloads/${platform}/`);
+        await message.reply(`⚠️ Unable to send video automatically due to WhatsApp limitations. File has been saved successfully.`);
+      } catch (notifyErr) {
+        console.error(`[${platformName.toUpperCase()}]`, 'Failed to notify user:', notifyErr);
+      }
+    }
+
+    return true;
+  } catch (err: any) {
+    console.error(`[${platformName.toUpperCase()} ERROR]`, err);
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    try {
+      await message.reply(`❌ Error downloading ${platformName} video: ${errorMessage}`);
+    } catch {
+      console.error(`[${platformName.toUpperCase()}]`, 'Failed to send error message to user');
+    }
+    return true;
+  }
+}
+
 async function handleMessageCreate(message: Message): Promise<void> {
   console.log('message_create:', message.from, "->", message.body);
 
@@ -264,6 +371,9 @@ async function handleMessageCreate(message: Message): Promise<void> {
 
   let body_text = shortMessage(message.body);
 
+  // Process media links from anyone, including messages sent by us.
+  if (await handleMediaLinks(message, body_text)) return;
+
   if (message.fromMe) {
     if (message.from === MY_NUMBER && body_text.startsWith('.')) {
       await respondViaOllama(message);
@@ -271,105 +381,6 @@ async function handleMessageCreate(message: Message): Promise<void> {
     return;
   }
 
-  // A shared YouTube link is equivalent to !play <url>.
-  if (!body_text.startsWith(PREFIX)) {
-    const youtubeUrl = extractYouTubeUrl(body_text.split('\n')[0].trim());
-    if (youtubeUrl) {
-      await commands['!play']?.run(message, youtubeUrl);
-      return;
-    }
-  }
-
-    // Auto-detect and download TikTok/Facebook/Instagram videos
-    if (!body_text.startsWith(PREFIX) && body_text.startsWith("http")) {
-      const firstLine = body_text.split("\n")[0].trim();
-      let videoUrl: string | null = null;
-      let platform: VideoPlatform = 'tiktok';
-      let platformName = 'TikTok';
-      
-      if (isTikTokUrl(firstLine)) {
-        videoUrl = extractTikTokUrl(firstLine);
-        platform = 'tiktok';
-        platformName = 'TikTok';
-      } else if (isFacebookUrl(firstLine)) {
-        videoUrl = extractFacebookUrl(firstLine);
-        platform = 'facebook';
-        platformName = 'Facebook';
-      } else if (isInstagramUrl(firstLine)) {
-        videoUrl = extractInstagramUrl(firstLine);
-        platform = 'instagram';
-        platformName = 'Instagram';
-      }
-      
-      if (videoUrl) {
-        try {
-          await message.reply(`🎬 Downloading ${platformName} video...`).catch(() => {});
-          const downloadResult = await downloadVideo(videoUrl, platform);
-          const outputFile = path.resolve(downloadResult.path);
-          
-          if (!fs.existsSync(outputFile)) {
-            throw new Error('Download finished but file is missing.');
-          }
-          
-          // Check file size (WhatsApp Web limit is ~16MB for videos)
-          const stats = fs.statSync(outputFile);
-          const fileSizeMB = stats.size / (1024 * 1024);
-          const MAX_VIDEO_SIZE_MB = 16;
-          
-          if (stats.size > MAX_VIDEO_SIZE_MB * 1024 * 1024) {
-            console.log(`[${platformName.toUpperCase()}]`, `Video too large: ${fileSizeMB.toFixed(2)}MB (max: ${MAX_VIDEO_SIZE_MB}MB)`);
-            try {
-              await message.reply(`❌ Video is too large (${fileSizeMB.toFixed(2)}MB). WhatsApp limit is ${MAX_VIDEO_SIZE_MB}MB.`);
-            } catch {}
-            // Clean up the file
-            try {
-              fs.unlinkSync(outputFile);
-            } catch (unlinkErr) {
-              console.error(`[${platformName.toUpperCase()}]`, 'Failed to delete oversized file:', unlinkErr);
-            }
-            return;
-          }
-          
-          const videoTitle = downloadResult.title || `${platformName} Video`;
-          console.log(`[${platformName.toUpperCase()}]`, 'Downloaded video:', videoTitle, outputFile, `(${fileSizeMB.toFixed(2)}MB)`);
-          
-          // Try to send video with error handling
-          let videoSent = false;
-          
-          try {
-            const media = MessageMedia.fromFilePath(outputFile);
-            await message.reply(media);
-            videoSent = true;
-            console.log(`[${platformName.toUpperCase()}]`, 'Video sent successfully');
-          } catch (sendErr: any) {
-            console.error(`[${platformName.toUpperCase()}]`, 'Error sending video:', sendErr?.message || sendErr);
-            
-            // If sending failed, inform user
-            if (!videoSent) {
-              try {
-                await message.reply(`✅ Video downloaded: ${videoTitle}`);
-                await message.reply(`📁 File saved at: downloads/${platform}/`);
-                await message.reply(`⚠️ Unable to send video automatically due to WhatsApp limitations. File has been saved successfully.`);
-              } catch (notifyErr) {
-                console.error(`[${platformName.toUpperCase()}]`, 'Failed to notify user:', notifyErr);
-              }
-            }
-          }
-          
-          return;
-        } catch (err: any) {
-          console.error(`[${platformName.toUpperCase()} ERROR]`, err);
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          try {
-            await message.reply(`❌ Error downloading ${platformName} video: ${errorMessage}`);
-          } catch {
-            console.error(`[${platformName.toUpperCase()}]`, 'Failed to send error message to user');
-          }
-          return;
-        }
-      }
-    }
-    
   if (body_text.startsWith("blocked_")) {
     const num = body_text.split("_")[1];
     addBlockedPattern(num);
@@ -381,6 +392,10 @@ async function handleMessageCreate(message: Message): Promise<void> {
   }
   
   if (!body_text.startsWith(PREFIX)) {
+    if (isBlocked(message.from)) {
+      console.log('[BLOCKED] Skipping AI reply for blocked sender:', message.from);
+      return;
+    }
     if (await isRecentlyReplied(message.from, body_text)) {
       console.log('[DEDUP] Skipping duplicate message from', message.from);
       return;
@@ -389,7 +404,7 @@ async function handleMessageCreate(message: Message): Promise<void> {
       console.log('[DEDUP] Skipping bot echo message from', message.from);
       return;
     }
-    // await respondViaOllama(message);
+    await respondViaOllama(message);
     return;
   }
 
@@ -414,6 +429,7 @@ function attachRuntimeHandlers(client: Client): void {
   client.on('ready', () => {
     clearReconnectReadyTimeout();
     reconnectInProgress = false;
+    reconnectDelayMs = 3_000;
     startHealthCheckScheduler();
   });
 
@@ -472,7 +488,7 @@ async function shutdown(signal: string): Promise<void> {
   reconnectInProgress = true;
 
   try {
-    await getClient().destroy();
+    await destroyWhatsAppClient();
   } catch (error) {
     console.warn('[WA] Error while shutting down client:', error);
   }

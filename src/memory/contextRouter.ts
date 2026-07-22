@@ -33,8 +33,21 @@ const SUMMARY_KEYWORDS = [
   'yaad', 'remember', 'discussed before', 'jo pehle', 'what did i say',
 ];
 
+// Long or multi-line messages (pasted documents, forwarded text) are never
+// treated as profile questions, even if they mention keywords like "email" or "age".
+const PROFILE_QUESTION_MAX_LENGTH = 200;
+
+export function looksLikeProfileQuestion(text: string): boolean {
+  const trimmed = text.trim();
+  return trimmed.length <= PROFILE_QUESTION_MAX_LENGTH && !trimmed.includes('\n');
+}
+
+// Match whole words/phrases only, so e.g. "message" doesn't trigger "age".
 function includesAny(text: string, keywords: string[]): boolean {
-  return keywords.some((keyword) => text.includes(keyword));
+  return keywords.some((keyword) => {
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?<!\\w)${escaped}(?!\\w)`, 'i').test(text);
+  });
 }
 
 export function detectLanguage(text: string): DetectedLanguage {
@@ -75,7 +88,7 @@ export function selectContext(messageText: string, _messages: StoredMessage[]): 
     };
   }
 
-  if (includesAny(normalized, PROFILE_KEYWORDS)) {
+  if (looksLikeProfileQuestion(messageText) && includesAny(normalized, PROFILE_KEYWORDS)) {
     return {
       language,
       includeProfile: true,

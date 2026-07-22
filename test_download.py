@@ -44,10 +44,12 @@ def _configure_cookies(ydl_opts: dict) -> None:
     cookies_file = os.environ.get("YTDLP_COOKIES_FILE")
     cookies_browser = os.environ.get("YTDLP_COOKIES_FROM_BROWSER")
 
+    # Prefer an exported cookies file when both are set — more reliable while Chrome is open.
     if cookies_file:
         cookie_path = Path(cookies_file).expanduser()
         if not cookie_path.is_file():
             raise RuntimeError(f"YTDLP_COOKIES_FILE does not exist: {cookie_path}")
+        ydl_opts.pop("cookiesfrombrowser", None)
         ydl_opts["cookiefile"] = str(cookie_path)
         return
 
@@ -55,7 +57,13 @@ def _configure_cookies(ydl_opts: dict) -> None:
         browser = cookies_browser.strip().lower()
         if not browser:
             raise RuntimeError("YTDLP_COOKIES_FROM_BROWSER cannot be empty")
-        ydl_opts["cookiesfrombrowser"] = (browser,)
+        ydl_opts.pop("cookiefile", None)
+        # Optional profile: YTDLP_COOKIES_FROM_BROWSER=chrome:Default
+        if ":" in browser:
+            name, profile = browser.split(":", 1)
+            ydl_opts["cookiesfrombrowser"] = (name, profile, None, None)
+        else:
+            ydl_opts["cookiesfrombrowser"] = (browser,)
 
 
 def _has_cookie_configuration() -> bool:
@@ -63,6 +71,31 @@ def _has_cookie_configuration() -> bool:
         os.environ.get("YTDLP_COOKIES_FILE")
         or os.environ.get("YTDLP_COOKIES_FROM_BROWSER")
     )
+
+
+def _is_youtube_bot_challenge(error: BaseException) -> bool:
+    msg = str(error).lower()
+    return any(
+        needle in msg
+        for needle in (
+            "sign in to confirm",
+            "not a bot",
+            "confirm you",
+            "login required",
+            "cookies-from-browser",
+        )
+    )
+
+
+def _apply_youtube_cookie_retry_opts(ydl_opts: dict) -> None:
+    """Attach cookies and use clients/formats that work better after a bot wall."""
+    _configure_cookies(ydl_opts)
+    ydl_opts["format"] = "bestaudio/best/ba/b"
+    ydl_opts["extractor_args"] = {
+        "youtube": {
+            "player_client": ["tv", "android", "web"],
+        }
+    }
 
 
 def _convert_video_to_whatsapp_format(input_path: Path, output_path: Path) -> bool:
@@ -330,31 +363,70 @@ def main() -> int:
     max_tries = 3
     info = None
     tried_cookies = False
+    # Never attach cookies on the first attempt — only after a bot/sign-in challenge.
     while tries < max_tries:
         try:
             with YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(target, download=True)
                 break
         except Exception as e:
-            print(f"Error downloading: {e}")
-            if "Sign in to confirm" in str(e):
+            print(f"Error downloading: {e}", file=sys.stderr)
+            if not is_video and _is_youtube_bot_challenge(e):
                 if not tried_cookies and _has_cookie_configuration():
                     try:
-                        _configure_cookies(ydl_opts)
+                        _apply_youtube_cookie_retry_opts(ydl_opts)
                     except RuntimeError as cookie_error:
-                        print(f"Unable to configure YouTube cookies: {cookie_error}")
+                        print(f"Unable to configure YouTube cookies: {cookie_error}", file=sys.stderr)
                         return 1
                     tried_cookies = True
-                    print("YouTube requested sign-in; retrying with configured cookies.")
+                    print(
+                        "YouTube requested sign-in; retrying with "
+                        f"YTDLP_COOKIES_FROM_BROWSER/YTDLP_COOKIES_FILE "
+                        f"(browser={os.environ.get('YTDLP_COOKIES_FROM_BROWSER')!r}).",
+                        file=sys.stderr,
+                    )
                     continue
 
-                print("YouTube requires cookies. Set YTDLP_COOKIES_FROM_BROWSER=chrome or YTDLP_COOKIES_FILE.")
+                if tried_cookies:
+                    print(
+                        "YouTube still blocked after cookie retry. "
+                        "Make sure you are logged into YouTube in that browser, "
+                        "or export cookies to YTDLP_COOKIES_FILE.",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        "YouTube requires cookies. Set YTDLP_COOKIES_FROM_BROWSER=chrome "
+                        "or YTDLP_COOKIES_FILE.",
+                        file=sys.stderr,
+                    )
                 return 1
+
+            # After cookies, a bare "format not available" often means the bot wall
+            # still blocked extraction — retry once more with cookies if we haven't.
+            if (
+                not is_video
+                and not tried_cookies
+                and _has_cookie_configuration()
+                and "requested format is not available" in str(e).lower()
+            ):
+                try:
+                    _apply_youtube_cookie_retry_opts(ydl_opts)
+                except RuntimeError as cookie_error:
+                    print(f"Unable to configure YouTube cookies: {cookie_error}", file=sys.stderr)
+                    return 1
+                tried_cookies = True
+                print(
+                    "Format unavailable; retrying YouTube download with configured cookies.",
+                    file=sys.stderr,
+                )
+                continue
+
             tries += 1
             if tries < max_tries:
                 time.sleep(1)
             else:
-                print(f"Failed to download after {max_tries} attempts.")
+                print(f"Failed to download after {max_tries} attempts.", file=sys.stderr)
                 return 1
 
     if info is None:

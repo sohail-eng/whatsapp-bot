@@ -53,12 +53,28 @@ const runDownload = (query: string) =>
     });
   });
 
-  // Here we will choose a random song from the available songs in the donwload directory
-  // return should be same as above runDownload function
-  const getRandomSong = () => 
+  // Pick a random mp3 from downloads/ (skip subdirs like tiktok/facebook/instagram).
+  const AUDIO_EXTENSIONS = new Set(['.mp3', '.m4a', '.ogg', '.opus', '.aac', '.wav']);
+
+  const getRandomSong = () =>
     new Promise<{ path: string; title?: string }>((resolve, reject) => {
       const downloadDirectory = path.join(PROJECT_ROOT, 'downloads');
-      const songs = fs.readdirSync(downloadDirectory);
+      if (!fs.existsSync(downloadDirectory)) {
+        return reject(new Error('No downloaded songs available yet.'));
+      }
+
+      const songs = fs
+        .readdirSync(downloadDirectory, { withFileTypes: true })
+        .filter(
+          (entry) =>
+            entry.isFile() && AUDIO_EXTENSIONS.has(path.extname(entry.name).toLowerCase()),
+        )
+        .map((entry) => entry.name);
+
+      if (songs.length === 0) {
+        return reject(new Error('No downloaded songs available yet.'));
+      }
+
       const randomSong = songs[Math.floor(Math.random() * songs.length)];
       resolve({ path: path.join(downloadDirectory, randomSong), title: randomSong });
     });
@@ -97,9 +113,20 @@ export default {
     } catch (err) {
       console.error('[PLAY ERROR]', err);
       const errorMessage = err instanceof Error ? err.message : String(err);
-      const reply = errorMessage.includes('Sign in to confirm you’re not a bot')
-        ? '❌ YouTube requires browser cookies. Configure YTDLP_COOKIES_FROM_BROWSER=chrome and try again.'
-        : '❌ Error playing this track.';
+      const lower = errorMessage.toLowerCase();
+      let reply = '❌ Error playing this track.';
+      if (lower.includes('still blocked after cookie retry')) {
+        reply =
+          '❌ YouTube blocked the download even with browser cookies. Log into YouTube in Chrome, or export cookies to YTDLP_COOKIES_FILE.';
+      } else if (
+        lower.includes('sign in to confirm') ||
+        lower.includes('not a bot') ||
+        lower.includes('requires cookies')
+      ) {
+        reply = process.env.YTDLP_COOKIES_FROM_BROWSER || process.env.YTDLP_COOKIES_FILE
+          ? '❌ YouTube cookie retry failed. Confirm Chrome is logged into YouTube, or set YTDLP_COOKIES_FILE.'
+          : '❌ YouTube requires browser cookies. Set YTDLP_COOKIES_FROM_BROWSER=chrome and try again.';
+      }
       await safeReply(message, reply);
     }
   },

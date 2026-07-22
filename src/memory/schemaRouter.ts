@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { OLLAMA_API_KEY, OLLAMA_CHAT_URL, OLLAMA_MODEL } from '../config';
 import { getProfileSchemaKeys } from '../profileData';
+import { looksLikeProfileQuestion } from './contextRouter';
 import { ChatMessage, SchemaRouterDecision } from './types';
 
 const SCHEMA_ROUTER_SYSTEM_PROMPT = `Classify the user message for a WhatsApp assistant.
@@ -100,11 +101,15 @@ export function buildFallbackSchemaDecision(messageText: string): SchemaRouterDe
     married: 'identity.maritalStatus',
   };
 
-  const requiredKeys = [...new Set(
-    Object.entries(familyMap)
-      .filter(([keyword]) => lower.includes(keyword))
-      .map(([, key]) => key),
-  )];
+  // Match whole words only, so e.g. "message" doesn't trigger the "age" keyword.
+  // Long/multi-line texts (pasted documents) are never profile questions.
+  const requiredKeys = looksLikeProfileQuestion(messageText)
+    ? [...new Set(
+      Object.entries(familyMap)
+        .filter(([keyword]) => new RegExp(`\\b${keyword}\\b`, 'i').test(lower))
+        .map(([, key]) => key),
+    )]
+    : [];
 
   return {
     language: /[\u0600-\u06FF]/.test(messageText) ? 'urdu' : 'roman_urdu',

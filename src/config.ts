@@ -33,7 +33,7 @@ export const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY;
 // WhatsApp connection watchdog configuration
 export const WA_HEALTHCHECK_INTERVAL_MS = parseInt(process.env.WA_HEALTHCHECK_INTERVAL_MS || '60000', 10);
 export const WA_HEALTHCHECK_TIMEOUT_MS = parseInt(process.env.WA_HEALTHCHECK_TIMEOUT_MS || '20000', 10);
-export const WA_RECONNECT_READY_TIMEOUT_MS = parseInt(process.env.WA_RECONNECT_READY_TIMEOUT_MS || '45000', 10);
+export const WA_RECONNECT_READY_TIMEOUT_MS = parseInt(process.env.WA_RECONNECT_READY_TIMEOUT_MS || '120000', 10);
 
 // Outbound message service (poll → WhatsApp → mark processed)
 export const MESSAGE_SERVICE_URL = (process.env.MESSAGE_SERVICE_URL || 'https://message-service.dev-link.cloud').replace(/\/$/, '');

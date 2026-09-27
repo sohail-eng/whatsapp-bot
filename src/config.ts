@@ -23,6 +23,15 @@ export const WA_HEALTHCHECK_INTERVAL_MS = parseInt(process.env.WA_HEALTHCHECK_IN
 export const WA_HEALTHCHECK_TIMEOUT_MS = parseInt(process.env.WA_HEALTHCHECK_TIMEOUT_MS || '20000', 10);
 export const WA_RECONNECT_READY_TIMEOUT_MS = parseInt(process.env.WA_RECONNECT_READY_TIMEOUT_MS || '45000', 10);
 
+// Outbound message service (poll → WhatsApp → mark processed)
+export const MESSAGE_SERVICE_URL = (process.env.MESSAGE_SERVICE_URL || 'https://message-service.dev-link.cloud').replace(/\/$/, '');
+export const MESSAGE_SERVICE_ADMIN_KEY = process.env.MESSAGE_SERVICE_ADMIN_KEY || '';
+export const MESSAGE_POLL_INTERVAL_MS = parseInt(process.env.MESSAGE_POLL_INTERVAL_MS || '30000', 10);
+/** Set to false/0/off to disable polling the outbound message service. */
+export const MESSAGE_SERVICE_URL_ACTIVE = !['false', '0', 'no', 'off'].includes(
+  (process.env.MESSAGE_SERVICE_URL_ACTIVE || 'true').toLowerCase(),
+);
+
 // Memory / token budget configuration
 export const MAX_RECENT_TURNS = parseInt(process.env.MAX_RECENT_TURNS || '6', 10);
 export const MAX_STORED_MESSAGES = parseInt(process.env.MAX_STORED_MESSAGES || '40', 10);

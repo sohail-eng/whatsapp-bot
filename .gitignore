@@ -44,4 +44,6 @@ __pycache__/*
 profile_data.json
 contact.csv
 
-blocked_patterns.txt
+blocked_patterns.tx
+
+node:readline

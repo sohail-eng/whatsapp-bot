@@ -7,6 +7,11 @@ import {
   WA_HEALTHCHECK_TIMEOUT_MS,
   WA_RECONNECT_READY_TIMEOUT_MS,
 } from './config';
+import {
+  setWhatsAppTransportFailureHandler,
+  startMessagePollScheduler,
+  stopMessagePollScheduler,
+} from './messagePoller';
 import { respondViaOllama } from './ollama';
 import { addBlockedPattern, isBlocked } from './utils/blockedPatterns';
 import { isRecentlyBotSent, isRecentlyReplied } from './utils/replyDedup';
@@ -92,6 +97,7 @@ async function reconnectWhatsApp(reason: string): Promise<void> {
   clearPendingHealthCheck();
   clearReconnectReadyTimeout();
   stopHealthCheckScheduler();
+  stopMessagePollScheduler();
 
   console.warn(`[WA] Reconnecting: ${reason}`);
 
@@ -108,6 +114,10 @@ async function reconnectWhatsApp(reason: string): Promise<void> {
     startWhatsAppClient(`reconnect after: ${reason}`);
   }, delay);
 }
+
+setWhatsAppTransportFailureHandler((reason) => {
+  void reconnectWhatsApp(reason);
+});
 
 async function runHealthCheck(): Promise<void> {
   if (pendingHealthCheckToken || reconnectInProgress || !hasClient()) return;
@@ -404,7 +414,7 @@ async function handleMessageCreate(message: Message): Promise<void> {
       console.log('[DEDUP] Skipping bot echo message from', message.from);
       return;
     }
-    await respondViaOllama(message);
+    // await respondViaOllama(message);
     return;
   }
 
@@ -431,6 +441,7 @@ function attachRuntimeHandlers(client: Client): void {
     reconnectInProgress = false;
     reconnectDelayMs = 3_000;
     startHealthCheckScheduler();
+    startMessagePollScheduler();
   });
 
   client.on('disconnected', (reason) => {
@@ -483,6 +494,7 @@ function startWhatsAppClient(reason: string): void {
 async function shutdown(signal: string): Promise<void> {
   console.log(`[WA] Shutting down (${signal})`);
   stopHealthCheckScheduler();
+  stopMessagePollScheduler();
   clearPendingHealthCheck();
   clearReconnectReadyTimeout();
   reconnectInProgress = true;

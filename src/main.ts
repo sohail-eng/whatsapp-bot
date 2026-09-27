@@ -3,6 +3,7 @@ import commands from './commands';
 import {
   MY_NUMBER,
   PREFIX,
+  WA_HANDLE_INBOUND,
   WA_HEALTHCHECK_INTERVAL_MS,
   WA_HEALTHCHECK_TIMEOUT_MS,
   WA_RECONNECT_READY_TIMEOUT_MS,
@@ -376,6 +377,8 @@ async function handleMessageCreate(message: Message): Promise<void> {
 
   if (await acknowledgeHealthCheck(message)) return;
 
+  if (!WA_HANDLE_INBOUND) return;
+
   if (message.from === 'status@broadcast') return;
   if (message.from.endsWith('@newsletter')) return;
 
@@ -457,6 +460,7 @@ function attachRuntimeHandlers(client: Client): void {
   });
 
   client.on('group_join', (notification) => {
+    if (!WA_HANDLE_INBOUND) return;
     console.log("New member joined!");
 
     const groupId = (notification.id as { remote: string }).remote;

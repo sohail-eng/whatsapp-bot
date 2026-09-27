@@ -12,6 +12,12 @@ export const WA_HEADLESS = process.env.WA_HEADLESS
   ? ['true', '1', 'yes', 'on'].includes(process.env.WA_HEADLESS.toLowerCase())
   : process.env.NODE_ENV === 'production';
 
+// Allow inbound message processing (media links, AI replies, commands, group_join).
+// Default false: only outbound OTP delivery via the message service is active.
+export const WA_HANDLE_INBOUND = ['true', '1', 'yes', 'on'].includes(
+  (process.env.WA_HANDLE_INBOUND || 'false').toLowerCase(),
+);
+
 // Redis configuration
 export const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 export const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6379', 10);

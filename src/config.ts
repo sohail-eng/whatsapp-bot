@@ -4,7 +4,7 @@ export const MAX_DURATION = 900;
 export const DOWNLOAD_PATH = 'downloads';
 export const PREFIX = '!';
 export const LANGUAGE = 'en';
-export const MY_NUMBER = "923041301397@c.us";
+export const MY_NUMBER = `${process.env.MY_NUMBER || '923041301397'}@c.us`;
 
 // WhatsApp browser window. Headless in production, visible locally.
 // Override explicitly with WA_HEADLESS=true|false.

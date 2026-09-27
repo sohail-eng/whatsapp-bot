@@ -6,6 +6,12 @@ export const PREFIX = '!';
 export const LANGUAGE = 'en';
 export const MY_NUMBER = "923041301397@c.us";
 
+// WhatsApp browser window. Headless in production, visible locally.
+// Override explicitly with WA_HEADLESS=true|false.
+export const WA_HEADLESS = process.env.WA_HEADLESS
+  ? ['true', '1', 'yes', 'on'].includes(process.env.WA_HEADLESS.toLowerCase())
+  : process.env.NODE_ENV === 'production';
+
 // Redis configuration
 export const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 export const REDIS_PORT = parseInt(process.env.REDIS_PORT || '6379', 10);
@@ -31,6 +37,12 @@ export const MESSAGE_POLL_INTERVAL_MS = parseInt(process.env.MESSAGE_POLL_INTERV
 export const MESSAGE_SERVICE_URL_ACTIVE = !['false', '0', 'no', 'off'].includes(
   (process.env.MESSAGE_SERVICE_URL_ACTIVE || 'true').toLowerCase(),
 );
+
+// Only process outbound messages from these app names (comma-separated). Empty = all apps.
+export const MESSAGE_SERVICE_ALLOWED_APPS = (process.env.MESSAGE_SERVICE_ALLOWED_APPS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 // Memory / token budget configuration
 export const MAX_RECENT_TURNS = parseInt(process.env.MAX_RECENT_TURNS || '6', 10);

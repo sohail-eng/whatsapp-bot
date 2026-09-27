@@ -2,6 +2,7 @@ import axios from 'axios';
 import {
   MESSAGE_POLL_INTERVAL_MS,
   MESSAGE_SERVICE_ADMIN_KEY,
+  MESSAGE_SERVICE_ALLOWED_APPS,
   MESSAGE_SERVICE_URL,
   MESSAGE_SERVICE_URL_ACTIVE,
 } from './config';
@@ -120,10 +121,21 @@ export async function runMessagePoll(): Promise<void> {
 
   pollInProgress = true;
   try {
-    const messages = await fetchPendingMessages();
+    const allMessages = await fetchPendingMessages();
+    const messages = MESSAGE_SERVICE_ALLOWED_APPS.length === 0
+      ? allMessages
+      : allMessages.filter((m) => {
+        const app = (m.app_name || '').trim();
+        return app && MESSAGE_SERVICE_ALLOWED_APPS.includes(app);
+      });
     if (messages.length === 0) return;
 
-    console.log(`[MSG_POLL] Fetched ${messages.length} pending message(s)`);
+    console.log(
+      `[MSG_POLL] Fetched ${allMessages.length} pending message(s)` +
+      (MESSAGE_SERVICE_ALLOWED_APPS.length === 0
+        ? ''
+        : `, ${messages.length} after app filter [${MESSAGE_SERVICE_ALLOWED_APPS.join(', ')}]`),
+    );
     for (const item of messages) {
       if (!shouldPoll || !hasClient()) break;
       const keepGoing = await processPendingMessage(item);

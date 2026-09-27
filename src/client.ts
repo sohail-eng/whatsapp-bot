@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 
 import text from './language';
-import { LANGUAGE } from './config';
+import { LANGUAGE, WA_HEADLESS } from './config';
 
 const chromiumPath = '/usr/bin/google-chrome';
 
@@ -65,7 +65,7 @@ export function createWhatsAppClient(): Client {
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: AUTH_DATA_PATH }),
     puppeteer: {
-      headless: false,
+      headless: WA_HEADLESS,
       executablePath,
       args: [
         '--no-sandbox',

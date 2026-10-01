@@ -50,6 +50,11 @@ export const MESSAGE_SERVICE_ALLOWED_APPS = (process.env.MESSAGE_SERVICE_ALLOWED
   .map((s) => s.trim())
   .filter(Boolean);
 
+// Direct HTTP send server (Express) — lets apps POST /send for instant delivery
+// instead of waiting for the 30s poll cycle. Set port to 0 to disable.
+export const HTTP_SERVER_PORT = parseInt(process.env.HTTP_SERVER_PORT || '0', 10);
+export const HTTP_SERVER_APP_KEY = process.env.HTTP_SERVER_APP_KEY || '';
+
 // Memory / token budget configuration
 export const MAX_RECENT_TURNS = parseInt(process.env.MAX_RECENT_TURNS || '6', 10);
 export const MAX_STORED_MESSAGES = parseInt(process.env.MAX_STORED_MESSAGES || '40', 10);

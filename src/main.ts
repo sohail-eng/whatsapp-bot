@@ -13,6 +13,7 @@ import {
   startMessagePollScheduler,
   stopMessagePollScheduler,
 } from './messagePoller';
+import { startHttpServer, stopHttpServer } from './httpServer';
 import { respondViaOllama } from './ollama';
 import { addBlockedPattern, isBlocked } from './utils/blockedPatterns';
 import { isRecentlyBotSent, isRecentlyReplied } from './utils/replyDedup';
@@ -445,6 +446,7 @@ function attachRuntimeHandlers(client: Client): void {
     reconnectDelayMs = 3_000;
     startHealthCheckScheduler();
     startMessagePollScheduler();
+    startHttpServer();
   });
 
   client.on('disconnected', (reason) => {
@@ -499,6 +501,7 @@ async function shutdown(signal: string): Promise<void> {
   console.log(`[WA] Shutting down (${signal})`);
   stopHealthCheckScheduler();
   stopMessagePollScheduler();
+  stopHttpServer();
   clearPendingHealthCheck();
   clearReconnectReadyTimeout();
   reconnectInProgress = true;
